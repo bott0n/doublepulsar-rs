@@ -1,0 +1,7 @@
+# Treats all imports as if they belong to one module, effectively grouping all imports together.
+# This can simplify the top of your files by having a single import section.
+imports_granularity = "One"
+
+# Combines all imports into a single block, without distinguishing between standard library, external crates, or internal modules.
+# This setting avoids separate blocks for different types of imports, creating a cleaner and more concise import section.
+group_imports = "One"

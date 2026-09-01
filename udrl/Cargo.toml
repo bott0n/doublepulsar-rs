@@ -1,0 +1,57 @@
+[package]
+name = "udrl"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "udrl"
+crate-type = ["staticlib", "cdylib"]
+
+
+[build-dependencies]
+cc = "1.0"
+
+[dependencies]
+# Low-level Windows API abstraction (DJB2 hash resolution, no_std wrappers)
+api = { path = "../crates/api", default-features = false }
+
+# UWD call stack spoofing (synthetic frames, .pdata parsing, ASM stub)
+uwd = { path = "../crates/uwd", default-features = false }
+
+# Sleep obfuscation (Ekko/Foliage/Zilean/XOR encrypt-sleep-decrypt)
+hypnus = { path = "../crates/hypnus", default-features = false }
+
+[features]
+default = ["sleep-xor", "spoof-uwd"]
+
+# Sleep techniques — choose one (or more)
+# Each supports both thread mode and fiber mode (ConvertThreadToFiber/SwitchToFiber)
+# Fiber mode isolates the sleep context from the main thread's stack
+sleep-ekko    = ["hypnus/sleep-ekko"]     # Timer-based (TpAllocTimer/TpSetTimer) + RC4 + NtContinue chain + fiber support
+sleep-foliage = ["hypnus/sleep-foliage"]  # APC-based (NtQueueApcThread) + RC4 + NtContinue chain + fiber support
+sleep-zilean  = ["hypnus/sleep-zilean"]   # Wait-based (TpAllocWait/TpSetWait) + RC4 + NtContinue chain + fiber support
+sleep-xor     = ["hypnus/sleep-xor"]      # XOR section masking + plain Sleep (no CONTEXT chain, no fiber mode)
+
+# Call stack spoofing — enables UWD synthetic frame construction
+# Both api AND uwd need the flag: api uses it for #[cfg] on spoof macro dispatch,
+# uwd uses it to compile the ASM stub and frame-building code
+spoof-uwd     = ["uwd/spoof-uwd", "api/spoof-uwd"]
+
+# Direct syscall dispatch — requires spoof-uwd
+# Both api AND uwd need the flag: api uses it for #[cfg] on spoof_syscall! paths,
+# uwd uses it to compile the SSN resolution module (Hell's/Halo's/Tartarus Gate)
+spoof-syscall = ["uwd/spoof-syscall", "api/spoof-syscall"]
+
+# Debug output
+debug-console  = ["api/debug-console", "hypnus/debug-console"]    # AllocConsole + WriteConsoleA logging
+debug-dbgprint = ["api/debug-dbgprint", "hypnus/debug-dbgprint"]  # DbgPrint output (visible in WinDbg)
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+panic = "abort"

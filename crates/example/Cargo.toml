@@ -1,0 +1,21 @@
+[package]
+name = "example"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+hypnus = { path = "../hypnus" }
+uwd = { path = "../uwd" }
+api = { path = "../api" }
+
+[features]
+default = ["sleep-ekko", "sleep-foliage", "sleep-zilean", "spoof-uwd", "debug-console"]
+sleep-ekko = ["hypnus/sleep-ekko"]
+sleep-foliage = ["hypnus/sleep-foliage"]
+sleep-zilean = ["hypnus/sleep-zilean"]
+sleep-xor = ["hypnus/sleep-xor"]
+spoof-uwd = ["uwd/spoof-uwd", "api/spoof-uwd"]
+spoof-syscall = ["uwd/spoof-syscall"]
+debug-console = ["api/debug-console", "hypnus/debug-console"]
+debug-dbgprint = ["api/debug-dbgprint", "hypnus/debug-dbgprint"]
+

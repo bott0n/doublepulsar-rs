@@ -1,0 +1,18 @@
+[package]
+name = "hypnus"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+sleep-ekko = []
+sleep-foliage = []
+sleep-zilean = []
+sleep-xor = []
+spoof-uwd = []
+debug-console = ["api/debug-console"]
+debug-dbgprint = ["api/debug-dbgprint"]
+
+[dependencies]
+api = { path = "../api" }
+ntdef = { path = "../ntdef" }
+uwd = { path = "../uwd" }

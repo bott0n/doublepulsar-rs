@@ -1,0 +1,7 @@
+[target.x86_64-pc-windows-gnu]
+linker = "C:/mingw64/bin/gcc.exe"
+ar = "C:/mingw64/bin/ar.exe"
+
+[target.i686-pc-windows-gnu]
+# No custom linker - Rust will look for i686-w64-mingw32-gcc in PATH
+ar = "C:/mingw32/bin/ar.exe"

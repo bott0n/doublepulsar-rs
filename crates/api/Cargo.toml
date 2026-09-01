@@ -1,0 +1,14 @@
+[package]
+name = "api"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+spoof-uwd = ["dep:uwd", "uwd/spoof-uwd"]
+spoof-syscall = ["spoof-uwd", "dep:uwd", "uwd/spoof-syscall"]
+debug-console = []
+debug-dbgprint = []
+
+[dependencies]
+ntdef = { path = "../ntdef" }
+uwd = { path = "../uwd", optional = true, default-features = false }

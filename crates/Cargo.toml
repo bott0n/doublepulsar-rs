@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "api",
+    "uwd",
+    "ntdef",
+    "hypnus",
+    "example",
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"

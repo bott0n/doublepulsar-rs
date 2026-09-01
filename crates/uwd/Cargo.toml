@@ -1,0 +1,14 @@
+[package]
+name = "uwd"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+spoof-uwd = []
+spoof-syscall = ["spoof-uwd"]
+
+[dependencies]
+ntdef = { path = "../ntdef" }
+
+[build-dependencies]
+cc = "1.2.55"

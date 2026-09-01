@@ -1,0 +1,282 @@
+# ============================================================================
+# UDRL (User-Defined Reflective Loader) Build Configuration
+# ============================================================================
+#
+# This Makefile.toml defines build tasks for cargo-make to compile the
+# reflective loader for both x64 and x86 architectures.
+#
+# USAGE:
+#   cargo make              - Build x64 + x86 release + injector
+#   cargo make x64          - Build x64 release only
+#   cargo make x86          - Build x86 release only
+#   cargo make debug        - Build x64 + x86 debug (with logging)
+#   cargo make x64-debug    - Build x64 debug only
+#   cargo make x86-debug    - Build x86 debug only
+#   cargo make injector     - Build injector test binary only
+#   cargo make test         - Build everything (release + injector)
+#   cargo make clean        - Clean all build artifacts
+#
+# OUTPUT:
+#   bin/AceLdr.x64.bin - x64 reflective loader shellcode (.text section)
+#   bin/AceLdr.x86.bin - x86 reflective loader shellcode (.text section)
+#   bin/injector.exe   - Test injector for shellcode
+#
+# CUSTOMIZATION:
+#   - Change OUTPUT_NAME to customize output filename
+#   - Modify OBJCOPY_X64/X86 paths if using different MinGW installations
+#   - Use debug-dbgprint,debug-console features for full debug output during development
+#
+# BUILD PROCESS:
+#   1. Compile Rust+assembly → DLL (linker script enforces memory layout)
+#   2. Extract .text section → raw shellcode binary (position-independent)
+#   3. Shellcode is ready to be embedded or injected
+#
+# ============================================================================
+
+# Disable cargo-make's built-in tasks (we define everything explicitly)
+[config]
+skip_core_tasks = true
+
+# ============================================================================
+# ENVIRONMENT VARIABLES
+# ============================================================================
+[env]
+NAME = "udrl"
+BIN_DIR = "bin"
+
+# OUTPUT_NAME: Customize the output filename for the shellcode binaries
+# Default: "Titan" → produces Titan.x64.bin and Titan.x86.bin
+OUTPUT_NAME = "Titan"
+
+# OBJCOPY TOOL PATHS
+# objcopy is used to extract the .text section from the compiled DLL.
+# Choose the appropriate paths for your platform:
+
+# --- Windows (Native MinGW) ---
+# Uncomment these if you have MinGW installed directly on Windows
+# OBJCOPY_X64 = "C:/mingw64/bin/objcopy.exe"
+# OBJCOPY_X86 = "C:/mingw32/bin/objcopy.exe"
+
+# --- Linux / WSL (MinGW Cross-Compiler) ---
+# Use these on Ubuntu/WSL with mingw-w64 cross-compiler packages
+OBJCOPY_X64 = "x86_64-w64-mingw32-objcopy"
+OBJCOPY_X86 = "i686-w64-mingw32-objcopy"
+
+# ============================================================================
+# CREATE DIRECTORIES
+# ============================================================================
+# Creates the bin/ directory if it doesn't exist.
+# This task runs as a dependency before any build tasks.
+[tasks.dirs]
+script_runner = "@duckscript"
+script = '''
+if not is_path_exists ${BIN_DIR}
+    mkdir ${BIN_DIR}
+end
+'''
+
+# ============================================================================
+# x64 RELEASE BUILD
+# ============================================================================
+# Builds the x64 reflective loader in release mode (no debug logging).
+# The output is a position-independent shellcode binary.
+
+# Step 1: Compile Rust + assembly → DLL with custom linker script
+# RUSTFLAGS:
+#   --image-base=0x0  - No preferred base address (position-independent)
+#   -Tscripts/linker.ld - Custom linker script for section ordering
+[tasks.x64-build]
+dependencies = ["dirs"]
+command = "cargo"
+args = ["build", "--release", "--target", "x86_64-pc-windows-gnu"]
+env = { "RUSTFLAGS" = "-C link-arg=-Wl,--image-base=0x0,-Tscripts/linker.ld" }
+
+# Step 2: Extract .text section from DLL → raw shellcode binary
+# objcopy --dump-section extracts only the .text section (code + data)
+# This produces a position-independent shellcode file ready for injection
+[tasks.x64-extract]
+dependencies = ["x64-build"]
+command = "${OBJCOPY_X64}"
+args = ["--dump-section", ".text=${BIN_DIR}/${OUTPUT_NAME}.x64.bin", "target/x86_64-pc-windows-gnu/release/udrl.dll"]
+
+# Step 3: Verify the extracted shellcode before it can be used
+# Checks the G_END/GetIp tail invariant and scans for references to linker
+# orphan sections (.bss/COMMON) that objcopy would silently omit.
+# NOTE: no dependencies on purpose - the release and debug flows both list
+# their own extract task first so verification runs on the right binary.
+[tasks.x64-verify]
+command = "python3"
+args = ["scripts/verify_shellcode.py", "${BIN_DIR}/${OUTPUT_NAME}.x64.bin"]
+
+# Final task: Print completion message
+[tasks.x64]
+dependencies = ["x64-extract", "x64-verify"]
+script_runner = "@duckscript"
+script = "echo x64 release build complete"
+
+# ============================================================================
+# x64 DEBUG BUILD
+# ============================================================================
+# Builds the x64 reflective loader with debug logging enabled.
+# Enables both debug-dbgprint (WinDbg) and debug-console (AllocConsole) output.
+
+# Step 1: Compile with debug-logging feature
+# --features debug-dbgprint,debug-console enables both DbgPrint (WinDbg/kd) and AllocConsole output
+[tasks.x64-debug-build]
+dependencies = ["dirs"]
+command = "cargo"
+args = ["build", "--release", "--features", "debug-dbgprint,debug-console", "--target", "x86_64-pc-windows-gnu"]
+env = { "RUSTFLAGS" = "-C link-arg=-Wl,--image-base=0x0,-Tscripts/linker.ld" }
+
+# Step 2: Extract .text section → debug shellcode binary
+[tasks.x64-debug-extract]
+dependencies = ["x64-debug-build"]
+command = "${OBJCOPY_X64}"
+args = ["--dump-section", ".text=${BIN_DIR}/${OUTPUT_NAME}.x64.bin", "target/x86_64-pc-windows-gnu/release/udrl.dll"]
+
+# Final task: Verify then print completion message
+[tasks.x64-debug]
+dependencies = ["x64-debug-extract", "x64-verify"]
+script_runner = "@duckscript"
+script = "echo x64 debug build complete"
+
+# ============================================================================
+# x86 RELEASE BUILD
+# ============================================================================
+# Builds the x86 (32-bit) reflective loader in release mode.
+# The output is a position-independent shellcode binary for 32-bit targets.
+
+# Step 1: Compile Rust + assembly → DLL (i686 target)
+[tasks.x86-build]
+dependencies = ["dirs"]
+command = "cargo"
+args = ["build", "--release", "--target", "i686-pc-windows-gnu"]
+env = { "RUSTFLAGS" = "-C link-arg=-Wl,--image-base=0x0,-Tscripts/linker.ld" }
+
+# Step 2: Extract .text section → x86 shellcode binary
+[tasks.x86-extract]
+dependencies = ["x86-build"]
+command = "${OBJCOPY_X86}"
+args = ["--dump-section", ".text=${BIN_DIR}/${OUTPUT_NAME}.x86.bin", "target/i686-pc-windows-gnu/release/udrl.dll"]
+
+# Final task: Print completion message
+[tasks.x86]
+dependencies = ["x86-extract"]
+script_runner = "@duckscript"
+script = "echo x86 release build complete"
+
+# ============================================================================
+# x86 DEBUG BUILD
+# ============================================================================
+# Builds the x86 (32-bit) reflective loader with debug logging enabled.
+
+# Step 1: Compile with debug-dbgprint + debug-console features (i686 target)
+[tasks.x86-debug-build]
+dependencies = ["dirs"]
+command = "cargo"
+args = ["build", "--release", "--features", "debug-dbgprint,debug-console", "--target", "i686-pc-windows-gnu"]
+env = { "RUSTFLAGS" = "-C link-arg=-Wl,--image-base=0x0,-Tscripts/linker.ld" }
+
+# Step 2: Extract .text section → x86 debug shellcode binary
+[tasks.x86-debug-extract]
+dependencies = ["x86-debug-build"]
+command = "${OBJCOPY_X86}"
+args = ["--dump-section", ".text=${BIN_DIR}/${OUTPUT_NAME}.x86.bin", "target/i686-pc-windows-gnu/release/udrl.dll"]
+
+# Final task: Print completion message
+[tasks.x86-debug]
+dependencies = ["x86-debug-extract"]
+script_runner = "@duckscript"
+script = "echo x86 debug build complete"
+
+# ============================================================================
+# CLEAN TASK
+# ============================================================================
+# Removes all build artifacts (cargo build output + bin/ directory contents).
+# Overrides cargo-make's built-in clean task with custom logic.
+#
+# What gets cleaned:
+#   - target/ directory (via cargo clean)
+#   - bin/*.bin files (shellcode binaries)
+#   - bin/*.exe files (injector executable)
+[tasks.clean]
+clear = true
+script_runner = "@duckscript"
+script = '''
+# Clean cargo build artifacts
+exec cargo clean
+
+# Resolve bin path relative to project root (works from any directory)
+root = get_env CARGO_MAKE_WORKING_DIRECTORY
+bin_path = join_path ${root} ${BIN_DIR}
+
+# Remove all .bin files (shellcode binaries)
+bin_files = glob_array ${bin_path}/*.bin
+for file in ${bin_files}
+    rm ${file}
+end
+
+# Remove all .exe files (injector)
+exe_files = glob_array ${bin_path}/*.exe
+for file in ${exe_files}
+    rm ${file}
+end
+
+echo Cleaned bin artifacts
+'''
+
+# ============================================================================
+# DEBUG TASK
+# ============================================================================
+# Builds both x64 and x86 debug versions (with logging) + injector.
+# Equivalent to: cargo make x64-debug && cargo make x86-debug && cargo make injector
+[tasks.debug]
+dependencies = ["x64-debug", "x86-debug", "injector"]
+
+# ============================================================================
+# INJECTOR TEST BINARY
+# ============================================================================
+# Builds a test injector (examples/injector.rs) for testing the shellcode.
+# The injector allocates memory, writes shellcode, and executes it.
+
+# Step 1: Build injector example as standard Windows executable
+# Note: Clears RUSTFLAGS because injector doesn't use custom linker script
+[tasks.injector-build]
+dependencies = ["dirs"]
+script_runner = "@duckscript"
+script = '''
+# Build the injector example (doesn't use linker script)
+set_env RUSTFLAGS ""
+exec cargo build --release --example injector --target x86_64-pc-windows-gnu
+'''
+
+# Step 2: Copy injector to bin/ directory
+[tasks.injector-copy]
+dependencies = ["injector-build"]
+script_runner = "@duckscript"
+script = '''
+cp target/x86_64-pc-windows-gnu/release/examples/injector.exe ${BIN_DIR}/injector.exe
+echo Copied injector.exe to ${BIN_DIR}/
+'''
+
+# Final task: Print completion message
+[tasks.injector]
+dependencies = ["injector-copy"]
+script_runner = "@duckscript"
+script = "echo Injector test binary ready at ${BIN_DIR}/injector.exe"
+
+# ============================================================================
+# TEST TASK
+# ============================================================================
+# Builds everything: x64 + x86 release shellcode + injector.
+# Use this to prepare for testing the shellcode with the injector.
+[tasks.test]
+dependencies = ["default", "injector"]
+
+# ============================================================================
+# DEFAULT TASK
+# ============================================================================
+# Default task when running "cargo make" with no arguments.
+# Builds x64 + x86 release shellcode + injector (everything you need).
+[tasks.default]
+dependencies = ["x64", "x86", "injector"]
