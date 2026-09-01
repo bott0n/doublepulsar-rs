@@ -2,7 +2,7 @@
 
 Blog: https://memn0ps.github.io/doublepulsar-a-user-defined-reflective-loader-in-the-crystal-palace-and-tradecraft-garden-era/
 
-Cobalt Strike User-Defined Reflective Loader (UDRL) written entirely in Rust. A ~65KB position-independent reflective loader with module stomping, synthetic call stack spoofing, sleep obfuscation (Ekko, FOLIAGE, Zilean, XOR), memory encryption, return address spoofing, IAT hooking, and heap isolation.
+Cobalt Strike User-Defined Reflective Loader (UDRL) written entirely in Rust. A ~48KB position-independent reflective loader with module stomping, synthetic call stack spoofing, sleep obfuscation (XOR default; Ekko, FOLIAGE, Zilean opt-in), memory encryption, return address spoofing, IAT hooking, and heap isolation.
 
 Named after [DoublePulsar](https://en.wikipedia.org/wiki/DoublePulsar), an implant developed by the NSA's [Equation Group](https://en.wikipedia.org/wiki/Equation_Group), leaked by the Shadow Brokers in 2017.
 
@@ -45,10 +45,12 @@ Import the `Titan.cna` script before generating shellcode. The script:
 
 | Feature | Technique | Description |
 |---------|-----------|-------------|
-| `sleep-ekko` | Ekko | Timer-based (TpAllocTimer/TpSetTimer) + RC4 + NtContinue chain + fiber support **(default)** |
+| `sleep-xor` | XOR | XOR section masking + plain Sleep (no CONTEXT chain, no fiber mode). CET shadow-stack safe **(default)** |
+| `sleep-ekko` | Ekko | Timer-based (TpAllocTimer/TpSetTimer) + RC4 + NtContinue chain + fiber support |
 | `sleep-foliage` | FOLIAGE | APC-based (NtQueueApcThread) + RC4 + NtContinue chain + fiber support |
 | `sleep-zilean` | Zilean | Wait-based (TpAllocWait/TpSetWait) + RC4 + NtContinue chain + fiber support |
-| `sleep-xor` | XOR | XOR section masking + plain Sleep (no CONTEXT chain, no fiber mode) |
+
+> **CET / shadow-stack caveat:** the Ekko/FOLIAGE/Zilean chains deliberately `ret` into gadget addresses that no `call` pushed — the exact condition hardware shadow stacks detect. On CETCOMPAT hosts (Windows 11 24H2+ with CET-capable CPUs, e.g. `wpr.exe` and other modern MS-signed binaries) the first chain return raises an uncatchable `0xC0000409` fastfail. Use `sleep-xor` (the default) against hardened targets; the NtContinue techniques are for hosts without shadow-stack enforcement. CFG-enabled hosts are supported either way (chain dispatch targets are registered via `SetProcessValidCallTargets`).
 
 ## Building
 
@@ -97,17 +99,18 @@ cargo make clean      # clean build artifacts
 Only enable one sleep feature at a time. They are mutually exclusive. Use `--no-default-features` when selecting a non-default technique.
 
 ```bash
-# Ekko (default)
+# XOR + stack spoofing (default, CET shadow-stack safe)
 cargo make x64
 
+# Ekko (opt-in, requires a host without CET shadow-stack enforcement)
+RUSTFLAGS="-C link-arg=-Wl,--image-base=0x0,-Tscripts/linker.ld" \
+  cargo build --release --target x86_64-pc-windows-gnu --features sleep-ekko,spoof-uwd --no-default-features
+
 # FOLIAGE
-cargo build --release --target x86_64-pc-windows-gnu --features sleep-foliage --no-default-features
+cargo build --release --target x86_64-pc-windows-gnu --features sleep-foliage,spoof-uwd --no-default-features
 
 # Zilean
-cargo build --release --target x86_64-pc-windows-gnu --features sleep-zilean --no-default-features
-
-# XOR (no ROP chain, no fiber)
-cargo build --release --target x86_64-pc-windows-gnu --features sleep-xor --no-default-features
+cargo build --release --target x86_64-pc-windows-gnu --features sleep-zilean,spoof-uwd --no-default-features
 ```
 
 ### Output
@@ -116,16 +119,22 @@ cargo build --release --target x86_64-pc-windows-gnu --features sleep-xor --no-d
 bin/Titan.x64.bin    - x64 shellcode
 ```
 
+Every build runs `scripts/verify_shellcode.py` after extraction and fails the build on two invariant violations: a broken G_END tail (the CNA-appended CONFIG would be misparsed) or any rip-relative reference landing outside the emitted blob (linker-orphan statics, e.g. an unfolded `.bss`).
+
 ## Detection
 
 Tested on Windows 10 (Build 19045) and Windows 11 (Build 22631) against Elastic 9.0.1 (trial) in prevention mode with aggressive settings and all rules enabled at the time of writing. Integrations enabled: Elastic Defend, Elastic Agent, Fleet Server, Prebuilt Security Detection Rules, Elastic Synthetics, System, and Windows. Cobalt Strike settings: Stageless Windows Executable, Raw output, x64 payload, Process exit function, winhttp library. YARA rules for detection are provided in [doublepulsar.yar](doublepulsar.yar). Shortly after the release of this project, in the same month, Elastic published a [behavioral rule targeting the call stack patterns](https://github.com/elastic/protections-artifacts/blob/278054cb0e90dca20d6fe06f63cce6600902d50d/behavior/rules/windows/defense_evasion_api_call_from_a_suspicious_stack.toml) produced by [SilentMoonwalk](https://github.com/klezVirus/SilentMoonwalk)-based spoofing implementations like [uwd](https://github.com/joaoviictorti/uwd) used in DoublePulsar.
 
 ## Known Issues
 
+- **CET shadow stacks:** Ekko/FOLIAGE/Zilean (NtContinue chains) fastfail with `0xC0000409` on CETCOMPAT hosts (Win11 24H2+, e.g. `wpr.exe`). `sleep-xor` (the default) is CET-immune. See [FIX.md](FIX.md) for the full analysis
+- **Host loader contract:** the whole blob must be contiguous in one buffer (the CONFIG must directly follow the loader at runtime), entered at offset 0, the buffer must stay alive for the process lifetime (a thread parks inside it), and the executing thread needs ~30 KB+ of stack. Loaders that free/reuse the buffer or strip/expect headers will crash it
+- The sacrificial stomp module is `d3d10.dll` — avoid sideloading the payload via a DLL of the same name (the loader would stomp the module hosting its own payload)
 - Not compatible with loaders that rely on the shellcode thread staying alive
 - Windows builds may encounter relocation errors with newer MinGW versions (use WSL)
 - AllocConsole logging can cause crashes when spammed with too many log entries, use DbgPrint instead
 - `stage.cleanup` has known limitations with module stomping
+- x86 `G_END()` latent bug: `G_END()` is hardcoded to `GetIp() + 11` for both architectures but the x86 GetIp assembles to 10 bytes — x86 is unsupported and this is intentionally unfixed
 
 ## Author
 
