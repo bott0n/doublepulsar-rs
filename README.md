@@ -6,6 +6,8 @@ Cobalt Strike User-Defined Reflective Loader (UDRL) written entirely in Rust. A 
 
 Named after [DoublePulsar](https://en.wikipedia.org/wiki/DoublePulsar), an implant developed by the NSA's [Equation Group](https://en.wikipedia.org/wiki/Equation_Group), leaked by the Shadow Brokers in 2017.
 
+> **Fork notice:** this is a modified version of [memN0ps/doublepulsar-rs](https://github.com/memN0ps/doublepulsar-rs). Changes on top of upstream: a linker-script fix for orphaned `.bss` statics that never made it into the emitted shellcode, a post-build shellcode verifier enforcing that invariant, EKKO sleep-chain fixes (self-sized `add rsp` gadget, `NtContinue` `TestAlert = FALSE`, CFG call-target registration for the timer stubs), and the default sleep obfuscation switched to `sleep-xor` for CET shadow-stack compatibility. Full engineering log in [FIX.md](FIX.md).
+
 ## Prepended Loader Architecture
 
 Unlike Stephen Fewer's original approach where the reflective loader is compiled into the DLL itself as an exported function, DoublePulsar uses the prepended loader architecture where the loader is placed before the Beacon DLL. The loader is fully position-independent shellcode that decrypts and maps the Beacon payload at runtime.
