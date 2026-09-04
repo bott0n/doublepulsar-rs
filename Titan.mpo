@@ -1,0 +1,29 @@
+#set sleeptime "5000";
+
+# AceLdr recommended/required args
+stage {
+    set cleanup "true";                 # Recommended, proof that it works
+    set userwx "false";                 # Recommended, proof that it works
+    set sleep_mask "false";             # !!Required!!
+    set obfuscate "true";               # Recommended, proof that it works
+    set stomppe "true";                 # Recommended, proof that it works
+    #set smartinject "false";            # !!Required!!
+    set allocator "VirtualAlloc";       # Not required, just an example
+}
+
+process-inject {
+    set userwx "false";                 # Recommended, proof that it works
+    set startrwx "false";               # Recommended, proof that it works
+    set allocator "VirtualAllocEx";     # Not required, just an example
+    execute {                           # Not required, just an example
+        CreateThread;
+        CreateRemoteThread;
+        NtQueueApcThread;
+        RtlCreateUserThread;            
+    }
+}
+
+#post-ex {
+ #   set obfuscate "true";               # Recommended, proof that it works
+  #  set smartinject "true";            # !!Required!!
+#}
